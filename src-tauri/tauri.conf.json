@@ -12,7 +12,25 @@
   },
   "tauri": {
     "allowlist": {
-      "all": true
+      "http": {
+        "all": true,
+        "request": false,
+        "scope": [
+          "https://api-free.deepl.com/v2/translate"
+        ]
+      },
+      "fs": {
+        "readFile": true,
+        "scope": [
+          "$RESOURCE/pdfs/*"
+        ]
+      },
+      "path": {
+        "all": true
+      },
+      "dialog": {
+        "all": true
+      }
     },
     "bundle": {
       "active": true,
@@ -29,7 +47,7 @@
         "icons/icon.icns",
         "icons/icon.ico"
       ],
-      "identifier": "com.tauri.dev",
+      "identifier": "cc.hyoban.full-pdf-translater",
       "longDescription": "",
       "macOS": {
         "entitlements": null,
@@ -38,7 +56,9 @@
         "providerShortName": null,
         "signingIdentity": null
       },
-      "resources": [],
+      "resources": [
+        "pdfs/*"
+      ],
       "shortDescription": "",
       "targets": "all",
       "windows": {
