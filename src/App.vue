@@ -20,6 +20,7 @@ watch(width, (newWidth, oldWidth) => {
 const pdfBinaryData = ref<ArrayBuffer>()
 const fileName = ref('')
 const isLoadingPdfData = ref(false)
+const isPdfSelected = ref(false)
 
 const openFileDialog = async () => {
   const selected = await open({
@@ -40,6 +41,7 @@ const openFileDialog = async () => {
     pdfBinaryData.value = welcomePdf
 
     isLoadingPdfData.value = false
+    isPdfSelected.value = true
   }
 }
 
@@ -68,7 +70,6 @@ const sentences = computed(() => {
 })
 
 // 默认展示我的简历 pdf
-const isPdfSelected = ref(false)
 const isDark = useDark()
 
 watch(isDark, async () => {
@@ -163,23 +164,26 @@ const onMouseDown = (e: MouseEvent) => {
     <div grow />
     <div
       :class="fileName ? 'mx-5' : 'mx-20'"
-      max-w-2xl shrink-0 h-screen
+      max-w-2xl h-screen
       flex="~ col gap-2" justify-center
     >
-      <div v-for="t in sentences" :key="t.sentence" overflow-y-auto>
-        <p my-3>
-          {{ t.sentence }}
-        </p>
-        <p my-3>
-          {{ t.translation }}
-        </p>
-      </div>
+      <template v-if="isPdfSelected">
+        <div
+          v-for="t in sentences"
+          :key="t.sentence"
+          overflow-y-auto
+        >
+          <p my-3>
+            {{ t.sentence }}
+          </p>
+          <p my-3>
+            {{ t.translation }}
+          </p>
+        </div>
+      </template>
       <div flex="~ col gap-2" w-max mx-auto>
         <button
-          btn @click="() => {
-            openFileDialog()
-            isPdfSelected = true
-          }"
+          btn @click="openFileDialog()"
         >
           {{ fileName.length === 0 ? '打开 PDF' : fileName.slice(0, 10) }}
         </button>
