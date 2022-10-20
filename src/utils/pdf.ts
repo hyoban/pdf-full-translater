@@ -1,50 +1,72 @@
 import * as pdfjs from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.entry'
+
 import type { TextContent, TextItem, TextStyle } from 'pdfjs-dist/types/src/display/api'
+import { computed, ref } from 'vue'
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
+const renderingTaskCount = ref(0)
+
+export const isRendering = computed(() => renderingTaskCount.value > 0)
+
 export async function renderPdfToCanvas(
-  data: ArrayBuffer,
-  canvas: HTMLCanvasElement,
-  pageNumber: number,
-  onCanvasSizeReady: (
-    width: number,
-    height: number,
-  ) => void,
+  pdfRawData: ArrayBuffer | undefined,
+  canvasWarpper: HTMLElement | undefined,
+  desiredWidth: number,
 ) {
+  if (!canvasWarpper || !pdfRawData)
+    return
+
   const pdf = await pdfjs.getDocument({
-    data,
+    data: pdfRawData,
   }).promise
 
-  const page = await pdf.getPage(pageNumber)
-  const scale = 1.5
-  const viewport = page.getViewport({ scale })
-  // Support HiDPI-screens.
-  const outputScale = window.devicePixelRatio || 1
+  parseSentencesFromPdf(pdf)
 
-  const context = canvas.getContext('2d')
+  let pageNumber = 1
+  canvasWarpper.innerHTML = ''
 
-  canvas.width = Math.floor(viewport.width * outputScale)
-  canvas.height = Math.floor(viewport.height * outputScale)
+  while (pageNumber <= pdf.numPages) {
+    renderingTaskCount.value++
 
-  onCanvasSizeReady(Math.floor(viewport.width), Math.floor(viewport.height))
+    const page = await pdf.getPage(pageNumber)
 
-  const transform = outputScale !== 1
-    ? [outputScale, 0, 0, outputScale, 0, 0]
-    : null
+    const viewport = page.getViewport({ scale: 1 })
 
-  const renderContext = {
-    canvasContext: context,
-    transform,
-    viewport,
+    const scale = desiredWidth / viewport.width
+    const scaledViewport = page.getViewport({ scale })
+
+    const outputScale = window.devicePixelRatio || 1
+
+    const canvas = canvasWarpper.appendChild(document.createElement('canvas'))
+
+    canvas.width = Math.floor(scaledViewport.width * outputScale)
+    canvas.height = Math.floor(scaledViewport.height * outputScale)
+    canvas.style.width = `${Math.floor(scaledViewport.width)}px`
+    canvas.style.height = `${Math.floor(scaledViewport.height)}px`
+
+    const transform = outputScale !== 1
+      ? [outputScale, 0, 0, outputScale, 0, 0]
+      : null
+
+    if (transform) {
+      page.render({
+        canvasContext: canvas.getContext('2d'),
+        transform,
+        viewport: scaledViewport,
+      }).promise.finally(() => {
+        renderingTaskCount.value--
+      })
+    }
+
+    pageNumber++
   }
-  page.render(renderContext)
 }
 
-export async function parseSentencesFromPdf(data: ArrayBuffer) {
-  const pdf = await pdfjs.getDocument({ data }).promise
+export const parsedSentences = ref<string[]>()
 
+export async function parseSentencesFromPdf(pdf: pdfjs.PDFDocumentProxy) {
   const textContentPromise = Array.from({ length: pdf.numPages })
     .map(async (_, i) => {
       const page = await pdf.getPage(i + 1)
@@ -149,5 +171,6 @@ export async function parseSentencesFromPdf(data: ArrayBuffer) {
   // 将形如 [1] 或 [10,11] 的内容去除
     .map(i => i.replace(/\[[0-9]+(,[0-9]+)*\]/g, ''))
 
-  return sentences
+  // FIXME: 展示全部句子
+  parsedSentences.value = sentences.slice(0, 3)
 }
