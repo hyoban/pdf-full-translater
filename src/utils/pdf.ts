@@ -66,7 +66,7 @@ export async function renderPdfToCanvas(
 
 export const parsedSentences = ref<string[]>()
 
-export async function parseSentencesFromPdf(pdf: pdfjs.PDFDocumentProxy) {
+async function parseSentencesFromPdf(pdf: pdfjs.PDFDocumentProxy) {
   const textContentPromise = Array.from({ length: pdf.numPages })
     .map(async (_, i) => {
       const page = await pdf.getPage(i + 1)
@@ -171,6 +171,5 @@ export async function parseSentencesFromPdf(pdf: pdfjs.PDFDocumentProxy) {
   // 将形如 [1] 或 [10,11] 的内容去除
     .map(i => i.replace(/\[[0-9]+(,[0-9]+)*\]/g, ''))
 
-  // FIXME: 展示全部句子
-  parsedSentences.value = sentences.slice(0, 3)
+  parsedSentences.value = sentences
 }

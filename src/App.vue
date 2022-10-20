@@ -7,7 +7,7 @@ import { BaseDirectory } from '@tauri-apps/api/path'
 import { open } from '@tauri-apps/api/dialog'
 
 import { translateFromDeepl } from './utils/network'
-import { isRendering, parseSentencesFromPdf, parsedSentences, renderPdfToCanvas } from './utils/pdf'
+import { isRendering, parsedSentences, renderPdfToCanvas } from './utils/pdf'
 
 const { width } = useWindowSize()
 const slider = ref(width.value / 2)
@@ -55,7 +55,8 @@ watch(parsedSentences, async () => {
     return
 
   translatedSentences.value = await Promise.all(
-    parsedSentences.value.map(i => translateFromDeepl(i, translateToken.value)),
+    // FIXME: 翻译全部句子
+    parsedSentences.value.slice(0, 3).map(i => translateFromDeepl(i, translateToken.value)),
   )
 })
 
@@ -146,6 +147,7 @@ const onMouseDown = (e: MouseEvent) => {
       }"
     />
     <div
+      id="pdf-viewer"
       ref="pdfViewer"
       max-h-screen
       overflow-y-scroll
@@ -163,25 +165,10 @@ const onMouseDown = (e: MouseEvent) => {
     />
     <div grow />
     <div
-      :class="fileName ? 'mx-5' : 'mx-20'"
-      max-w-2xl h-screen
+      max-w-2xl h-screen p-10
       flex="~ col gap-2" justify-center
     >
-      <template v-if="isPdfSelected">
-        <div
-          v-for="t in sentences"
-          :key="t.sentence"
-          overflow-y-auto
-        >
-          <p my-3>
-            {{ t.sentence }}
-          </p>
-          <p my-3>
-            {{ t.translation }}
-          </p>
-        </div>
-      </template>
-      <div flex="~ col gap-2" w-max mx-auto>
+      <div flex="~ row gap-2" w-max mx-auto>
         <button
           btn @click="openFileDialog()"
         >
@@ -194,28 +181,55 @@ const onMouseDown = (e: MouseEvent) => {
           input-t text-center
         >
       </div>
+      <div v-if="isPdfSelected" overflow-y-scroll>
+        <div
+          v-for="t, index in sentences"
+          :key="t.sentence + index"
+        >
+          <p my-3>
+            {{ t.sentence }}
+          </p>
+          <p my-3>
+            {{ t.translation }}
+          </p>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
-<style scoped>
+<style>
+html {
+  --c-bg: #fff;
+  --c-scrollbar: #eee;
+  --c-scrollbar-hover: #bbb;
+}
+
+html.dark {
+  --c-bg: #050505;
+  --c-scrollbar: #111;
+  --c-scrollbar-hover: #222;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
-  display: none;
 }
 ::-webkit-scrollbar:horizontal {
   height: 6px;
-  display: inline;
 }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner {
-  background: #fff;
+  background: var(--c-bg);
   border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #eee;
+  background: var(--c-scrollbar);
   border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #bbb;
+  background: var(--c-scrollbar-hover);
+}
+
+#pdf-viewer::-webkit-scrollbar {
+  display: none;
 }
 </style>
