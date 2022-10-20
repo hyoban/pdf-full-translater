@@ -1,44 +1,61 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useDark, useFileSystemAccess, useWindowSize } from '@vueuse/core'
+import { computed, ref, watch } from 'vue'
+import { useDark, useWindowSize } from '@vueuse/core'
 
 import { readBinaryFile } from '@tauri-apps/api/fs'
 import { BaseDirectory } from '@tauri-apps/api/path'
+import { open } from '@tauri-apps/api/dialog'
 
 import { translateFromDeepl } from './utils/network'
-import { parseSentencesFromPdf, renderPdfToCanvas } from './utils/pdf'
+import { isRendering, parseSentencesFromPdf, parsedSentences, renderPdfToCanvas } from './utils/pdf'
 
-const isDark = useDark()
+const { width } = useWindowSize()
+const slider = ref(width.value / 2)
 
-const isPdfSelected = ref(false)
+watch(width, (newWidth, oldWidth) => {
+  // 屏幕尺寸变更时，保持滑块位置不变
+  slider.value = newWidth / oldWidth * slider.value
+})
 
-const { height } = useWindowSize()
-const pdfCanvasSize = reactive({ width: 0, height: 0 })
-const actualCanvasSize = computed(() => {
-  const ratio = pdfCanvasSize.height / pdfCanvasSize.width
+const pdfBinaryData = ref<ArrayBuffer>()
+const fileName = ref('')
+const isLoadingPdfData = ref(false)
 
-  if (isNaN(ratio))
-    return { width: 0, height: 0 }
+const openFileDialog = async () => {
+  const selected = await open({
+    multiple: false,
+    filters: [{
+      name: 'PDF',
+      extensions: ['pdf'],
+    }],
+  })
+  if (selected !== null && !Array.isArray(selected)) {
+    isLoadingPdfData.value = true
 
-  return {
-    height: height.value,
-    width: height.value / ratio,
+    fileName.value = /^(\w:)?[\\\/]/.test(selected) // use regex to check windows path
+      ? selected.split('\\').pop() || ''
+      : selected.split('/').pop() || ''
+
+    const welcomePdf = await readBinaryFile(selected)
+    pdfBinaryData.value = welcomePdf
+
+    isLoadingPdfData.value = false
   }
-})
+}
 
-const { data, fileName, open } = useFileSystemAccess({
-  dataType: 'ArrayBuffer',
-  types: [{
-    description: 'Pdf files',
-    accept: {
-      'application/pdf': ['.pdf'],
-    },
-  }],
-})
-
-const parsedSentences = ref<string[]>()
 const translatedSentences = ref<string[]>()
 const translateToken = ref('')
+
+watch(parsedSentences, async () => {
+  if (!parsedSentences.value || parsedSentences.value.length === 0)
+    return
+  if (!translateToken.value)
+    return
+
+  translatedSentences.value = await Promise.all(
+    parsedSentences.value.map(i => translateFromDeepl(i, translateToken.value)),
+  )
+})
 
 const sentences = computed(() => {
   if (!parsedSentences.value)
@@ -50,67 +67,105 @@ const sentences = computed(() => {
   }))
 })
 
-watch(parsedSentences, async () => {
-  if (!parsedSentences.value || parsedSentences.value.length === 0)
-    return
-  if (!translateToken.value) {
-    // eslint-disable-next-line no-alert
-    alert('请输入翻译令牌')
-    return
-  }
-
-  translatedSentences.value = await Promise.all(
-    parsedSentences.value.map(i => translateFromDeepl(i, translateToken.value)),
-  )
-})
-
-const generate = async () => {
-  parsedSentences.value = (await parseSentencesFromPdf(
-    data.value as ArrayBuffer,
-  )).slice(0, 3)
-}
-
-const isMounted = ref(false)
-onMounted(() => {
-  isMounted.value = true
-  // generate()
-})
+// 默认展示我的简历 pdf
+const isPdfSelected = ref(false)
+const isDark = useDark()
 
 watch(isDark, async () => {
   if (!isPdfSelected.value) {
     const welcomePdf = await readBinaryFile(`pdfs/example-${isDark.value ? 'dark' : 'light'}.pdf`, { dir: BaseDirectory.Resource })
-    data.value = welcomePdf
+    pdfBinaryData.value = welcomePdf
   }
 }, { immediate: true })
 
-watch(data, async () => {
-  if (isMounted.value) {
-    renderPdfToCanvas(
-      data.value as ArrayBuffer,
-      document.getElementById('pdf-preview') ! as HTMLCanvasElement,
-      1,
-      (w, h) => {
-        pdfCanvasSize.width = w
-        pdfCanvasSize.height = h
-      },
-    )
+const pdfViewer = ref<HTMLElement>()
+
+const render = async () => {
+  await renderPdfToCanvas(
+    pdfBinaryData.value as ArrayBuffer,
+    pdfViewer.value as HTMLElement,
+    slider.value,
+  )
+}
+
+const debounce = (func: { apply: (arg0: void, arg1: any) => void }, timeout = 300) => {
+  let timer: number | undefined
+  return (...args: any) => {
+    clearTimeout(timer)
+    timer = setTimeout(() => { func.apply(this, args) }, timeout)
   }
-  if (isPdfSelected.value)
-    await generate()
-})
+}
+
+const debounceRender = debounce(async () => {
+  await render()
+}, 300)
+
+watch(
+  [slider, pdfBinaryData],
+  async (
+    [newSlider],
+    [oldSlider],
+  ) => {
+    if (newSlider === oldSlider)
+      render()
+    debounceRender()
+  },
+  { immediate: true },
+)
+
+const onMouseDown = (e: MouseEvent) => {
+  const { clientX } = e
+  const { left } = (e.target! as HTMLDivElement).getBoundingClientRect()
+
+  const diff = clientX - left
+
+  const onMouseMove = (e: MouseEvent) => {
+    const { clientX } = e
+    slider.value = clientX - diff
+  }
+
+  const onMouseUp = () => {
+    document.removeEventListener('mousemove', onMouseMove)
+    document.removeEventListener('mouseup', onMouseUp)
+  }
+
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mouseup', onMouseUp)
+}
 </script>
 
 <template>
-  <div flex="~ row" min-h-screen min-w-screen justify-between items-center>
-    <canvas
-      id="pdf-preview"
-      ref="el"
+  <div relative flex="~ row" min-h-screen min-w-screen justify-between items-center>
+    <div
+      v-show="isLoadingPdfData || isRendering"
+      text-green i-mdi-loading animate-spin
+      absolute z-10 w-10 h-10 top="1/2"
       :style="{
-        width: `${actualCanvasSize.width}px`,
-        height: `${actualCanvasSize.height}px`,
+        left: `${slider / 2}px`,
       }"
     />
-    <div :class="fileName ? 'mx-5' : 'mx-20'" h-screen flex="~ col gap-2" justify-center>
+    <div
+      ref="pdfViewer"
+      max-h-screen
+      overflow-y-scroll
+      flex-none
+      :class="(isLoadingPdfData || isRendering) ? 'op-0' : ''"
+      :style="{
+        width: `${slider}px`,
+      }"
+    />
+    <div
+      z-100 h-screen w-2 shrink-0
+      cursor-ew-resize
+      bg-gray opacity-50
+      @mousedown="onMouseDown"
+    />
+    <div grow />
+    <div
+      :class="fileName ? 'mx-5' : 'mx-20'"
+      max-w-2xl shrink-0 h-screen
+      flex="~ col gap-2" justify-center
+    >
       <div v-for="t in sentences" :key="t.sentence" overflow-y-auto>
         <p my-3>
           {{ t.sentence }}
@@ -122,7 +177,7 @@ watch(data, async () => {
       <div flex="~ col gap-2" w-max mx-auto>
         <button
           btn @click="() => {
-            open()
+            openFileDialog()
             isPdfSelected = true
           }"
         >
@@ -138,3 +193,25 @@ watch(data, async () => {
     </div>
   </div>
 </template>
+
+<style scoped>
+::-webkit-scrollbar {
+  width: 6px;
+  display: none;
+}
+::-webkit-scrollbar:horizontal {
+  height: 6px;
+  display: inline;
+}
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner {
+  background: #fff;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #eee;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #bbb;
+}
+</style>
